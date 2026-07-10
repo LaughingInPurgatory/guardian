@@ -10,14 +10,13 @@ audio assets.
 
 ## Controls
 
-- **Move**: WASD / Arrow keys, mouse (ship steers toward the cursor), or a gamepad's left stick
+- **Move**: WASD / Arrow keys or a gamepad's left stick (mouse steering is available too, see below)
 - **Fire**: Space, left mouse button, or gamepad face button
+- **Toggle Mouse Steering**: `M` — off by default, since idle mouse jitter otherwise fights keyboard input; turn it on if you want the ship to steer toward the cursor
 - **Smart Bomb** (clears the screen): `B` / gamepad B button
 - **Drop Bomb** (falling, blast-radius bomb — good against ground tanks/turrets): `G` / gamepad X button
 - **Hyperspace**: `H` / gamepad bumper
 - **Pause**: `Escape`
-
-All three control schemes work simultaneously — pick whichever's in your hands.
 
 ## Development
 

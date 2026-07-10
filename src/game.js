@@ -84,6 +84,7 @@ class Game {
     this.time = 0;
     this.keys = new Set();
     this.mouse = { x: 0, y: 0, down: false, active: false };
+    this.mouseControlEnabled = false;
     this.gamepadFireLatch = false;
     this.gamepadBombLatch = false;
     this.gamepadHyperLatch = false;
@@ -107,10 +108,17 @@ class Game {
 
   _bindInput() {
     window.addEventListener('keydown', (e) => {
+      if (e.target && e.target.tagName === 'INPUT') return;
       this.audio.init();
       if (e.code === 'Escape') {
         if (this.state === 'playing') this.pause();
         else if (this.state === 'paused') this.resume();
+        return;
+      }
+      if (e.code === 'KeyM') {
+        this.mouseControlEnabled = !this.mouseControlEnabled;
+        this.mouse.active = false;
+        this.showBanner(`MOUSE CONTROL: ${this.mouseControlEnabled ? 'ON' : 'OFF'}`);
         return;
       }
       this.keys.add(e.code);
@@ -145,7 +153,7 @@ class Game {
     hyperPressed = hyperPressed || this.keys.has('KeyH');
     dropBombPressed = dropBombPressed || this.keys.has('KeyG');
 
-    if (this.mouse.active && this.player) {
+    if (this.mouseControlEnabled && this.mouse.active && this.player) {
       const dx = this.mouse.x - this.viewW / 2;
       const dy = this.mouse.y - this.player.y;
       const dist = Math.hypot(dx, dy);
@@ -154,8 +162,8 @@ class Game {
         ax += (dx / dist) * mag;
         ay += (dy / dist) * mag;
       }
-      fire = fire || this.mouse.down;
     }
+    fire = fire || this.mouse.down;
 
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     for (const gp of pads) {
@@ -1097,6 +1105,10 @@ class Game {
     ctx.fillText(`WAVE ${this.wave}`, 200, this.viewH - 26);
     ctx.fillText(`LIVES ${this.lives}`, 320, this.viewH - 26);
     ctx.fillText(`BOMBS ${this.bombs}`, 460, this.viewH - 26);
+    ctx.fillStyle = this.mouseControlEnabled ? '#4df0ff' : '#5a6a78';
+    ctx.textAlign = 'right';
+    ctx.fillText(`MOUSE (M): ${this.mouseControlEnabled ? 'ON' : 'OFF'}`, this.viewW - 12, this.viewH - 26);
+    ctx.textAlign = 'left';
   }
 
   _drawMinimap() {

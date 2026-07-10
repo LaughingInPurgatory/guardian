@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Guardian</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="hud" class="hidden"></div>
+
+  <section id="titleScreen" class="screen">
+    <div class="scanlines"></div>
+    <h1 class="title-logo">GUARDIAN</h1>
+    <p class="subtitle">Defend the last humanoids. Survive forever. Fail eventually.</p>
+    <button id="startBtn" class="arcade-btn">START (Enter / Space / Click / Gamepad)</button>
+    <div class="controls-hint">
+      <span>WASD / Arrows — Move</span>
+      <span>Mouse / Space / Gamepad — Fire &amp; Steer</span>
+      <span>B — Smart Bomb &nbsp; H — Hyperspace &nbsp; Esc — Pause</span>
+    </div>
+    <div class="scores-panel">
+      <h2>High Scores</h2>
+      <ul id="titleScores" class="score-list"></ul>
+    </div>
+  </section>
+
+  <section id="pauseScreen" class="screen hidden">
+    <h1 class="title-logo small">PAUSED</h1>
+    <p id="punLine" class="pun-line"></p>
+    <div class="menu-col">
+      <button id="resumeBtn" class="arcade-btn">Return to Game</button>
+      <button id="restartBtn" class="arcade-btn">Restart</button>
+      <button id="quitBtn" class="arcade-btn danger">Quit to Desktop</button>
+    </div>
+    <div class="scores-panel">
+      <h2>High Scores</h2>
+      <ul id="pauseScores" class="score-list"></ul>
+    </div>
+  </section>
+
+  <section id="gameoverScreen" class="screen hidden">
+    <h1 class="title-logo game-over">GAME OVER</h1>
+    <p id="finalScore" class="subtitle"></p>
+    <div id="initialsEntry" class="initials-entry hidden">
+      <label for="initialsInput">New high score! Enter initials:</label>
+      <input id="initialsInput" maxlength="12" autocomplete="off" />
+      <button id="saveInitialsBtn" class="arcade-btn">Save</button>
+    </div>
+    <div class="scores-panel">
+      <h2>High Scores</h2>
+      <ul id="gameoverScores" class="score-list"></ul>
+    </div>
+    <button id="playAgainBtn" class="arcade-btn">Play Again</button>
+  </section>
+
+  <script src="src/logic.js"></script>
+  <script src="src/audio.js"></script>
+  <script src="src/highscores.js"></script>
+  <script src="src/puns.js"></script>
+  <script src="src/game.js"></script>
+  <script>
+    const canvas = document.getElementById('game');
+    const game = new window.GuardianGame.Game(canvas);
+    game._renderHighScoreList('titleScores');
+
+    document.getElementById('startBtn').addEventListener('click', () => game.startNewGame());
+    document.getElementById('resumeBtn').addEventListener('click', () => game.resume());
+    document.getElementById('restartBtn').addEventListener('click', () => game.startNewGame());
+    document.getElementById('quitBtn').addEventListener('click', () => game.quitToDesktop());
+    document.getElementById('playAgainBtn').addEventListener('click', () => {
+      game._renderHighScoreList('titleScores');
+      game.state = 'title';
+      document.getElementById('gameoverScreen').classList.add('hidden');
+      document.getElementById('titleScreen').classList.remove('hidden');
+    });
+    document.getElementById('saveInitialsBtn').addEventListener('click', () => {
+      game.submitInitials(document.getElementById('initialsInput').value.toUpperCase());
+    });
+    document.getElementById('initialsInput').addEventListener('keydown', (e) => {
+      if (e.code === 'Enter') document.getElementById('saveInitialsBtn').click();
+    });
+
+    const origStart = game.startNewGame.bind(game);
+    game.startNewGame = () => { document.getElementById('titleScreen').classList.add('hidden'); origStart(); };
+  </script>
+</body>
+</html>

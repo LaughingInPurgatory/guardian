@@ -31,6 +31,9 @@
     ],
     "mac": {
       "category": "public.app-category.action-games",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
       "target": [
         {
           "target": "dmg",
@@ -41,6 +44,7 @@
         }
       ]
     },
+    "afterSign": "scripts/afterSign.js",
     "linux": {
       "category": "Game",
       "target": [

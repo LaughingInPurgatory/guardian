@@ -17,12 +17,16 @@ const WAVE_DURATION = 35;
 const MAX_BOMBS = 3;
 const BOMB_REGEN_TIME = 22;
 const HYPER_COOLDOWN = 5;
-const BULLET_SPEED = 780;
+const BULLET_SPEED = 1100;
 const BULLET_TTL = 1.1;
+const BEAM_LENGTH = 60;
 const PLAYER_ACCEL = 950;
 const PLAYER_DRAG = 2.4;
 const PLAYER_MAX_SPEED = 480;
 const PLAYER_RADIUS = 12;
+const DEATH_RESPAWN_DELAY = 1.6;
+const IMPLOSION_DURATION = 0.8;
+const GROUND_CLEARANCE = 40;
 
 function rand(min, max) { return min + Math.random() * (max - min); }
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -60,6 +64,7 @@ const ENEMY_STATS = {
   pod: { hp: 5, speed: 30, radius: 18, score: 120, fireChance: 0 },
   swarmer: { hp: 1, speed: 220, radius: 7, score: 60, fireChance: 0 },
   turret: { hp: 3, speed: 0, radius: 12, score: 300, fireChance: 0.25 },
+  tank: { hp: 6, speed: 35, radius: 15, score: 280, fireChance: 0.22 },
 };
 
 const POWERUP_TYPES = ['rapid', 'shield', 'multishot', 'bomb', 'life', 'score'];
@@ -192,7 +197,7 @@ class Game {
     this.particles = [];
     this.powerups = [];
     this.banner = null;
-    this.player = { x: WORLD_W / 2, y: this.viewH / 2, vx: 0, vy: 0, facing: 1, invuln: 2, effects: {} };
+    this.player = { x: WORLD_W / 2, y: this.viewH / 2, vx: 0, vy: 0, facing: 1, invuln: 2, effects: {}, hidden: false, respawnTimer: 0, implosionSpawned: false };
     this.score = 0;
     this.lives = 3;
     this.bombs = MAX_BOMBS;
@@ -271,19 +276,30 @@ class Game {
   spawnEnemy() {
     let type;
     if (this.allHumanoidsGone) {
-      type = Math.random() < 0.85 ? 'mutant' : 'bomber';
+      type = choice(['mutant', 'mutant', 'mutant', 'mutant', 'mutant', 'mutant', 'bomber', 'tank']);
     } else {
       const w = this.wave;
       type = choice([
         'lander', 'lander', 'lander',
         ...(w > 2 ? ['mutant', 'mutant'] : []),
         ...(w > 4 ? ['bomber'] : []),
+        ...(w > 5 ? ['tank'] : []),
         ...(w > 6 ? ['pod'] : []),
       ]);
     }
     const stats = ENEMY_STATS[type];
     const x = wrap(this.player.x + rand(-1, 1) * (WORLD_W / 2 - 200) + WORLD_W / 4, WORLD_W);
-    const y = rand(TOP_MARGIN + 40, this.viewH - GROUND_MARGIN - 60);
+
+    if (type === 'tank') {
+      const y = this.viewH - GROUND_MARGIN - groundHeightAt(this.elev, x) - 14;
+      this.enemies.push({ type, x, y, vx: 0, vy: 0, hp: stats.hp, facing: 1, state: 'patrol', fireCooldown: rand(0.5, 2), phase: rand(0, Math.PI * 2) });
+      return;
+    }
+
+    const minY = TOP_MARGIN + 40;
+    const groundY = this.viewH - GROUND_MARGIN - groundHeightAt(this.elev, x) - GROUND_CLEARANCE;
+    const maxY = Math.max(minY + 10, groundY);
+    const y = rand(minY, maxY);
     this.enemies.push({
       type, x, y, vx: 0, vy: 0, hp: stats.hp, facing: Math.random() < 0.5 ? -1 : 1,
       state: 'seeking', fireCooldown: rand(0.5, 2), phase: rand(0, Math.PI * 2),
@@ -333,6 +349,18 @@ class Game {
 
   _updatePlayer(dt, input) {
     const p = this.player;
+    if (p.respawnTimer > 0) {
+      p.respawnTimer -= dt;
+      if (!p.implosionSpawned && p.respawnTimer <= IMPLOSION_DURATION) {
+        this._spawnImplosion(p.x, p.y);
+        p.implosionSpawned = true;
+      }
+      if (p.respawnTimer <= 0) {
+        p.hidden = false;
+        p.invuln = 2;
+      }
+      return;
+    }
     if (p.invuln > 0) p.invuln -= dt;
     p.vx += input.ax * PLAYER_ACCEL * dt;
     p.vy += input.ay * PLAYER_ACCEL * dt;
@@ -344,6 +372,7 @@ class Game {
     p.x = wrap(p.x + p.vx * dt, WORLD_W);
     p.y = clamp(p.y + p.vy * dt, TOP_MARGIN + PLAYER_RADIUS, this.viewH - 10);
     if (Math.abs(input.ax) > 0.12) p.facing = input.ax > 0 ? 1 : -1;
+    if (Math.hypot(input.ax, input.ay) > 0.1) this._spawnExhaust();
 
     const groundY = this.viewH - GROUND_MARGIN - groundHeightAt(this.elev, p.x);
     if (p.y + PLAYER_RADIUS > groundY && p.invuln <= 0) this._killPlayer();
@@ -392,16 +421,44 @@ class Game {
     if (Math.random() < 0.15) this._killPlayer();
   }
 
+  _spawnExhaust() {
+    const p = this.player;
+    const tailX = p.x - p.facing * 14;
+    for (let i = 0; i < 2; i++) {
+      this.particles.push({
+        x: tailX, y: p.y + rand(-2, 2),
+        vx: -p.facing * rand(60, 140) + rand(-20, 20), vy: rand(-20, 20),
+        life: rand(0.15, 0.3), maxLife: 0.3,
+        color: choice(['#ffcc33', '#ff8844', '#ff4422']),
+      });
+    }
+  }
+
+  _spawnImplosion(x, y) {
+    const n = 50;
+    for (let i = 0; i < n; i++) {
+      const a = rand(0, Math.PI * 2);
+      const r = rand(50, 110);
+      const speed = r / IMPLOSION_DURATION;
+      this.particles.push({
+        x: x + Math.cos(a) * r, y: y + Math.sin(a) * r,
+        vx: -Math.cos(a) * speed, vy: -Math.sin(a) * speed,
+        life: IMPLOSION_DURATION, maxLife: IMPLOSION_DURATION, color: '#4df0ff',
+      });
+    }
+  }
+
   _killPlayer() {
-    if (this.player.invuln > 0) return;
+    if (this.player.invuln > 0 || this.player.hidden) return;
     this.audio.playerHit();
-    this.spawnExplosion(this.player.x, this.player.y, 30, '#f84');
+    this.spawnExplosion(this.player.x, this.player.y, 90, '#f84');
+    this.spawnExplosion(this.player.x, this.player.y, 40, '#ff0');
     this.lives--;
     if (this.lives <= 0) { this.enterGameOver(); return; }
-    this.player.x = wrap(rand(0, WORLD_W), WORLD_W);
-    this.player.y = this.viewH / 2;
     this.player.vx = 0; this.player.vy = 0;
-    this.player.invuln = 2.5;
+    this.player.hidden = true;
+    this.player.implosionSpawned = false;
+    this.player.respawnTimer = DEATH_RESPAWN_DELAY;
   }
 
   _updateEnemies(dt) {
@@ -414,6 +471,7 @@ class Game {
       else if (e.type === 'bomber') this._updateBomber(e, dt, speed);
       else if (e.type === 'pod') this._updatePod(e, dt, speed);
       else if (e.type === 'swarmer') this._updateSwarmer(e, dt, speed);
+      else if (e.type === 'tank') this._updateTank(e, dt, speed);
 
       e.fireCooldown -= dt;
       if (stats.fireChance > 0 && e.fireCooldown <= 0) {
@@ -508,6 +566,14 @@ class Game {
     e.facing = dx >= 0 ? 1 : -1;
   }
 
+  _updateTank(e, dt, speed) {
+    e.phase += dt;
+    const dir = Math.sin(e.phase * 0.3);
+    e.x = wrap(e.x + dir * speed * dt, WORLD_W);
+    e.facing = dir >= 0 ? 1 : -1;
+    e.y = this.viewH - GROUND_MARGIN - groundHeightAt(this.elev, e.x) - 14;
+  }
+
   _updateTurrets(dt) {
     const diff = computeDifficulty(this.wave);
     for (const t of this.turrets) {
@@ -595,7 +661,7 @@ class Game {
       return true;
     });
 
-    if (p.invuln <= 0) {
+    if (!p.hidden && p.invuln <= 0) {
       for (const b of this.enemyBullets) {
         if (this._wrappedHit(b.x, b.y, 3, p.x, p.y, PLAYER_RADIUS)) { b.ttl = 0; this._killPlayer(); break; }
       }
@@ -604,19 +670,21 @@ class Game {
       }
     }
 
-    for (const h of this.humanoids) {
-      if (h.state === 'falling' && this._wrappedHit(h.x, h.y, 8, p.x, p.y, PLAYER_RADIUS + 6)) {
-        h.state = 'ground';
-        h.vy = 0;
-        this.score += 250;
-        this.audio.humanoidCaught();
+    if (!p.hidden) {
+      for (const h of this.humanoids) {
+        if (h.state === 'falling' && this._wrappedHit(h.x, h.y, 8, p.x, p.y, PLAYER_RADIUS + 6)) {
+          h.state = 'ground';
+          h.vy = 0;
+          this.score += 250;
+          this.audio.humanoidCaught();
+        }
       }
-    }
 
-    this.powerups = this.powerups.filter((pu) => {
-      if (this._wrappedHit(pu.x, pu.y, 10, p.x, p.y, PLAYER_RADIUS + 4)) { this._applyPowerup(pu.kind); return false; }
-      return true;
-    });
+      this.powerups = this.powerups.filter((pu) => {
+        if (this._wrappedHit(pu.x, pu.y, 10, p.x, p.y, PLAYER_RADIUS + 4)) { this._applyPowerup(pu.kind); return false; }
+        return true;
+      });
+    }
   }
 
   _applyPowerup(kind) {
@@ -744,21 +812,39 @@ class Game {
     ctx.translate(sx, y);
     ctx.scale(facing, 1);
     ctx.strokeStyle = hue;
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillStyle = 'rgba(10,20,30,0.55)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(16, 0);
-    ctx.lineTo(-12, -9);
-    ctx.lineTo(-6, 0);
-    ctx.lineTo(-12, 9);
+    ctx.moveTo(18, 0);
+    ctx.lineTo(8, -3);
+    ctx.lineTo(2, -11);
+    ctx.lineTo(-6, -6);
+    ctx.lineTo(-14, -3);
+    ctx.lineTo(-10, 0);
+    ctx.lineTo(-14, 3);
+    ctx.lineTo(-6, 6);
+    ctx.lineTo(2, 11);
+    ctx.lineTo(8, 3);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+
+    ctx.fillStyle = 'rgba(180,240,255,0.85)';
+    ctx.beginPath();
+    ctx.ellipse(6, 0, 3.2, 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#ff8844';
+    ctx.beginPath();
+    ctx.arc(-10, -2.5, 1.8, 0, Math.PI * 2);
+    ctx.arc(-10, 2.5, 1.8, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
 
   _drawPlayer() {
     const p = this.player;
+    if (p.hidden) return;
     const flashHidden = p.invuln > 0 && Math.floor(this.time * 10) % 2 === 0;
     if (flashHidden) return;
     this._shipPath(this.ctx, this.viewW / 2, p.y, p.facing, p.effects.shield ? '#8ff' : '#4df0ff');
@@ -770,6 +856,7 @@ class Game {
     for (const e of this.enemies) {
       const sx = this._relX(e.x);
       if (sx < -30 || sx > this.viewW + 30) continue;
+      if (e.type === 'tank') { this._drawTank(e, sx); continue; }
       ctx.save();
       ctx.translate(sx, e.y);
       ctx.scale(e.facing, 1);
@@ -784,6 +871,25 @@ class Game {
       ctx.stroke();
       ctx.restore();
     }
+  }
+
+  _drawTank(e, sx) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(sx, e.y);
+    ctx.scale(e.facing, 1);
+    ctx.fillStyle = '#5c6b2e';
+    ctx.strokeStyle = '#9cad4e';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.rect(-14, -6, 24, 10);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(8, -2);
+    ctx.lineTo(20, -2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   _drawTurrets() {
@@ -806,10 +912,23 @@ class Game {
 
   _drawBullets() {
     const ctx = this.ctx;
-    ctx.fillStyle = '#fffab0';
     for (const b of this.playerBullets) {
       const sx = this._relX(b.x);
-      ctx.fillRect(sx - 4, b.y - 1.5, 8, 3);
+      const angle = Math.atan2(b.vy, b.vx);
+      const tailX = sx - Math.cos(angle) * BEAM_LENGTH;
+      const tailY = b.y - Math.sin(angle) * BEAM_LENGTH;
+      ctx.strokeStyle = 'rgba(255, 250, 176, 0.35)';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(sx, b.y);
+      ctx.stroke();
+      ctx.strokeStyle = '#fffab0';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(sx, b.y);
+      ctx.stroke();
     }
     ctx.fillStyle = '#ff5d5d';
     for (const b of this.enemyBullets) {

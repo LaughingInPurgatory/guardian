@@ -35,3 +35,13 @@ npm run dist   # builds for the current platform via electron-builder
 Tagged pushes (`vX.Y.Z`) trigger `.github/workflows/release.yml`, which builds
 macOS (`.dmg`, arm64+x64), Linux (`.AppImage`, arm64+x64), and Windows (`.exe`,
 x64+arm64) installers and publishes them to a GitHub Release.
+
+### macOS: "Guardian is damaged and can't be opened"
+
+The mac build is ad-hoc signed (no paid Apple Developer ID, so it isn't
+notarized). macOS quarantines anything downloaded from a browser and refuses
+to run it until you clear that flag once:
+
+```
+xattr -cr /Applications/Guardian.app
+```

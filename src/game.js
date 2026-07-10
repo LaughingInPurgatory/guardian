@@ -21,12 +21,15 @@ const BULLET_SPEED = 1100;
 const BULLET_TTL = 1.1;
 const BEAM_LENGTH = 60;
 const PLAYER_ACCEL = 950;
-const PLAYER_DRAG = 2.4;
+const PLAYER_DRAG = 0; // authentic Defender inertia: no passive braking, only active reverse-thrust slows you down
 const PLAYER_MAX_SPEED = 480;
 const PLAYER_RADIUS = 12;
 const DEATH_RESPAWN_DELAY = 1.6;
 const IMPLOSION_DURATION = 0.8;
 const GROUND_CLEARANCE = 40;
+const DROP_BOMB_COOLDOWN = 1.2;
+const DROP_BOMB_GRAVITY = 600;
+const DROP_BOMB_BLAST_RADIUS = 55;
 
 function rand(min, max) { return min + Math.random() * (max - min); }
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -130,7 +133,7 @@ class Game {
   }
 
   _readCombinedInput() {
-    let ax = 0, ay = 0, fire = false, bombPressed = false, hyperPressed = false, pausePressed = false;
+    let ax = 0, ay = 0, fire = false, bombPressed = false, hyperPressed = false, pausePressed = false, dropBombPressed = false;
     const up = this.keys.has('KeyW') || this.keys.has('ArrowUp');
     const down = this.keys.has('KeyS') || this.keys.has('ArrowDown');
     const left = this.keys.has('KeyA') || this.keys.has('ArrowLeft');
@@ -140,6 +143,7 @@ class Game {
     fire = fire || this.keys.has('Space');
     bombPressed = bombPressed || this.keys.has('KeyB');
     hyperPressed = hyperPressed || this.keys.has('KeyH');
+    dropBombPressed = dropBombPressed || this.keys.has('KeyG');
 
     if (this.mouse.active && this.player) {
       const dx = this.mouse.x - this.viewW / 2;
@@ -163,7 +167,9 @@ class Game {
       const bombBtn = gp.buttons[1]?.pressed;
       const hyperBtn = gp.buttons[4]?.pressed || gp.buttons[5]?.pressed;
       const pauseBtn = gp.buttons[9]?.pressed;
+      const dropBombBtn = gp.buttons[2]?.pressed;
       fire = fire || fireBtn;
+      dropBombPressed = dropBombPressed || dropBombBtn;
       if (bombBtn && !this.gamepadBombLatch) bombPressed = true;
       if (hyperBtn && !this.gamepadHyperLatch) hyperPressed = true;
       if (pauseBtn && !this.gamepadPauseLatch) pausePressed = true;
@@ -174,7 +180,7 @@ class Game {
 
     const len = Math.hypot(ax, ay);
     if (len > 1) { ax /= len; ay /= len; }
-    return { ax, ay, fire, bombPressed, hyperPressed, pausePressed };
+    return { ax, ay, fire, bombPressed, hyperPressed, pausePressed, dropBombPressed };
   }
 
   // ---------- lifecycle ----------
@@ -194,10 +200,12 @@ class Game {
     this.enemies = [];
     this.playerBullets = [];
     this.enemyBullets = [];
+    this.playerBombs = [];
     this.particles = [];
+    this.shockwaves = [];
     this.powerups = [];
     this.banner = null;
-    this.player = { x: WORLD_W / 2, y: this.viewH / 2, vx: 0, vy: 0, facing: 1, invuln: 2, effects: {}, hidden: false, respawnTimer: 0, implosionSpawned: false };
+    this.player = { x: WORLD_W / 2, y: this.viewH / 2, vx: 0, vy: 0, facing: 1, invuln: 2, effects: {}, hidden: false, respawnTimer: 0, implosionSpawned: false, bombDropCooldown: 0 };
     this.score = 0;
     this.lives = 3;
     this.bombs = MAX_BOMBS;
@@ -250,7 +258,7 @@ class Game {
 
   enterGameOver() {
     this.state = 'gameover';
-    this.audio.stopMusic();
+    this.audio.setIntensity(0);
     this.audio.gameOverJingle();
     document.getElementById('finalScore').textContent = `Score: ${this.score} — Wave ${this.wave}`;
     const qualifies = isHighScore(this.score);
@@ -313,9 +321,19 @@ class Game {
 
   spawnExplosion(x, y, n, color) {
     for (let i = 0; i < n; i++) {
-      const a = rand(0, Math.PI * 2), s = rand(30, 220);
-      this.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: rand(0.3, 0.7), maxLife: 0.7, color });
+      const a = rand(0, Math.PI * 2), s = rand(30, 320);
+      const maxLife = rand(0.35, 1.0);
+      this.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: maxLife, maxLife, size: rand(2, 8), color });
     }
+  }
+
+  _spawnShockwave(x, y, maxRadius, color, duration = 0.4) {
+    this.shockwaves.push({ x, y, t: 0, duration, maxRadius, color });
+  }
+
+  _updateShockwaves(dt) {
+    for (const s of this.shockwaves) s.t += dt;
+    this.shockwaves = this.shockwaves.filter((s) => s.t < s.duration);
   }
 
   showBanner(text) {
@@ -339,9 +357,11 @@ class Game {
     this._updateEnemies(dt);
     this._updateTurrets(dt);
     this._updateBullets(dt);
+    this._updatePlayerBombs(dt);
     this._updateHumanoids(dt);
     this._updatePowerups(dt);
     this._updateParticles(dt);
+    this._updateShockwaves(dt);
     this._handleCollisions();
     this._updateWaveAndSpawns(dt);
     if (this.banner) { this.banner.t -= dt; if (this.banner.t <= 0) this.banner = null; }
@@ -352,7 +372,10 @@ class Game {
     if (p.respawnTimer > 0) {
       p.respawnTimer -= dt;
       if (!p.implosionSpawned && p.respawnTimer <= IMPLOSION_DURATION) {
+        p.x = p.respawnX;
+        p.y = p.respawnY;
         this._spawnImplosion(p.x, p.y);
+        this.audio.implode();
         p.implosionSpawned = true;
       }
       if (p.respawnTimer <= 0) {
@@ -375,7 +398,7 @@ class Game {
     if (Math.hypot(input.ax, input.ay) > 0.1) this._spawnExhaust();
 
     const groundY = this.viewH - GROUND_MARGIN - groundHeightAt(this.elev, p.x);
-    if (p.y + PLAYER_RADIUS > groundY && p.invuln <= 0) this._killPlayer();
+    if (p.y + PLAYER_RADIUS > groundY && p.invuln <= 0) this._killPlayer('ground');
 
     for (const key in p.effects) { p.effects[key] -= dt; if (p.effects[key] <= 0) delete p.effects[key]; }
 
@@ -393,6 +416,42 @@ class Game {
 
     if (input.bombPressed && this.bombs > 0) this._useSmartBomb();
     if (input.hyperPressed && this.time - this.lastHyperTime > HYPER_COOLDOWN) this._useHyperspace();
+
+    p.bombDropCooldown = (p.bombDropCooldown || 0) - dt;
+    if (input.dropBombPressed && p.bombDropCooldown <= 0) {
+      p.bombDropCooldown = DROP_BOMB_COOLDOWN;
+      this._dropBomb();
+    }
+  }
+
+  _dropBomb() {
+    this.playerBombs.push({ x: this.player.x, y: this.player.y, vx: this.player.vx * 0.4, vy: 60, ttl: 4 });
+    this.audio.dropBomb();
+  }
+
+  _updatePlayerBombs(dt) {
+    for (const b of this.playerBombs) {
+      if (b.detonated) continue;
+      b.vy += DROP_BOMB_GRAVITY * dt;
+      b.x = wrap(b.x + b.vx * dt, WORLD_W);
+      b.y += b.vy * dt;
+      b.ttl -= dt;
+      const groundY = this.viewH - GROUND_MARGIN - groundHeightAt(this.elev, b.x);
+      if (b.y >= groundY) this._detonateBomb(b);
+    }
+    this.playerBombs = this.playerBombs.filter((b) => !b.detonated && b.ttl > 0);
+  }
+
+  _detonateBomb(bomb) {
+    bomb.detonated = true;
+    this.audio.explosion(1.3);
+    this.spawnExplosion(bomb.x, bomb.y, 55, '#ffaa33');
+    this._spawnShockwave(bomb.x, bomb.y, 95, '#ffaa33');
+    for (const e of [...this.enemies, ...this.turrets]) {
+      const dx = wrapDelta(e.x - bomb.x, WORLD_W);
+      const dy = e.y - bomb.y;
+      if (dx * dx + dy * dy < DROP_BOMB_BLAST_RADIUS * DROP_BOMB_BLAST_RADIUS) e.hp -= 99;
+    }
   }
 
   _fireBullet(x, y, facing, angleOffset) {
@@ -409,7 +468,8 @@ class Game {
       if (Math.abs(dx) < this.viewW / 2 + 100) { e.hp -= 99; }
     }
     this.enemyBullets = [];
-    this.spawnExplosion(this.player.x, this.player.y, 40, '#8ff');
+    this.spawnExplosion(this.player.x, this.player.y, 60, '#8ff');
+    this._spawnShockwave(this.player.x, this.player.y, this.viewW / 2 + 100, '#8ff', 0.6);
   }
 
   _useHyperspace() {
@@ -448,17 +508,22 @@ class Game {
     }
   }
 
-  _killPlayer() {
+  _killPlayer(cause = 'combat') {
     if (this.player.invuln > 0 || this.player.hidden) return;
     this.audio.playerHit();
-    this.spawnExplosion(this.player.x, this.player.y, 90, '#f84');
-    this.spawnExplosion(this.player.x, this.player.y, 40, '#ff0');
+    this.spawnExplosion(this.player.x, this.player.y, 140, '#f84');
+    this.spawnExplosion(this.player.x, this.player.y, 70, '#ff0');
+    this.spawnExplosion(this.player.x, this.player.y, 30, '#fff');
+    this._spawnShockwave(this.player.x, this.player.y, 170, '#ffcc66', 0.55);
+    this._spawnShockwave(this.player.x, this.player.y, 110, '#ffffff', 0.35);
     this.lives--;
     if (this.lives <= 0) { this.enterGameOver(); return; }
     this.player.vx = 0; this.player.vy = 0;
     this.player.hidden = true;
     this.player.implosionSpawned = false;
     this.player.respawnTimer = DEATH_RESPAWN_DELAY;
+    this.player.respawnX = this.player.x;
+    this.player.respawnY = cause === 'ground' ? this.viewH / 2 : this.player.y;
   }
 
   _updateEnemies(dt) {
@@ -477,7 +542,7 @@ class Game {
       if (stats.fireChance > 0 && e.fireCooldown <= 0) {
         const dx = wrapDelta(this.player.x - e.x, WORLD_W);
         if (Math.abs(dx) < 500 && Math.random() < stats.fireChance) {
-          this._enemyFire(e, dx);
+          if (e.type === 'tank') this._tankFire(e); else this._enemyFire(e, dx);
         }
         e.fireCooldown = rand(1.2, 2.2) / diff.speedMult;
       }
@@ -595,6 +660,13 @@ class Game {
     this.audio.enemyShoot();
   }
 
+  _tankFire(e) {
+    const diff = computeDifficulty(this.wave);
+    const speed = 260 * diff.bulletSpeedMult;
+    this.enemyBullets.push({ x: e.x, y: e.y, vx: 0, vy: -speed, ttl: 2.5 });
+    this.audio.enemyShoot();
+  }
+
   _updateBullets(dt) {
     for (const b of this.playerBullets) { b.x = wrap(b.x + b.vx * dt, WORLD_W); b.y += b.vy * dt; b.ttl -= dt; }
     for (const b of this.enemyBullets) {
@@ -660,6 +732,14 @@ class Game {
       if (t.hp <= 0) { this.score += ENEMY_STATS.turret.score; this.spawnExplosion(t.x, t.y, 18, '#fc5'); this.audio.explosion(1); return false; }
       return true;
     });
+
+    for (const b of this.playerBombs) {
+      if (b.detonated) continue;
+      for (const e of [...this.enemies, ...this.turrets]) {
+        if (e.hp <= 0) continue;
+        if (this._wrappedHit(b.x, b.y, 6, e.x, e.y, ENEMY_STATS[e.type].radius)) { this._detonateBomb(b); break; }
+      }
+    }
 
     if (!p.hidden && p.invuln <= 0) {
       for (const b of this.enemyBullets) {
@@ -741,10 +821,12 @@ class Game {
       this._drawTerrain();
       this._drawHumanoids();
       this._drawPowerups();
+      this._drawShockwaves();
       this._drawParticles();
       this._drawEnemies();
       this._drawTurrets();
       this._drawBullets();
+      this._drawPlayerBombs();
       this._drawPlayer();
       this._drawHud();
       this._drawMinimap();
@@ -961,13 +1043,48 @@ class Game {
 
   _drawParticles() {
     const ctx = this.ctx;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
     for (const p of this.particles) {
       const sx = this._relX(p.x);
-      ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
+      const t = clamp(p.life / p.maxLife, 0, 1);
+      ctx.globalAlpha = t;
       ctx.fillStyle = p.color;
-      ctx.fillRect(sx - 1.5, p.y - 1.5, 3, 3);
+      const r = (p.size || 3) * (0.35 + 0.65 * t);
+      ctx.beginPath();
+      ctx.arc(sx, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  _drawShockwaves() {
+    const ctx = this.ctx;
+    for (const s of this.shockwaves) {
+      const t = clamp(s.t / s.duration, 0, 1);
+      const sx = this._relX(s.x);
+      ctx.globalAlpha = 1 - t;
+      ctx.strokeStyle = s.color;
+      ctx.lineWidth = 3 * (1 - t) + 1;
+      ctx.beginPath();
+      ctx.arc(sx, s.y, s.maxRadius * t, 0, Math.PI * 2);
+      ctx.stroke();
     }
     ctx.globalAlpha = 1;
+  }
+
+  _drawPlayerBombs() {
+    const ctx = this.ctx;
+    for (const b of this.playerBombs) {
+      const sx = this._relX(b.x);
+      ctx.fillStyle = '#ffaa33';
+      ctx.strokeStyle = '#ffe0a0';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(sx, b.y, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
   }
 
   _drawHud() {

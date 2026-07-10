@@ -12,7 +12,8 @@ audio assets.
 
 - **Move**: WASD / Arrow keys, mouse (ship steers toward the cursor), or a gamepad's left stick
 - **Fire**: Space, left mouse button, or gamepad face button
-- **Smart Bomb**: `B` / gamepad B button
+- **Smart Bomb** (clears the screen): `B` / gamepad B button
+- **Drop Bomb** (falling, blast-radius bomb — good against ground tanks/turrets): `G` / gamepad X button
 - **Hyperspace**: `H` / gamepad bumper
 - **Pause**: `Escape`
 

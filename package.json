@@ -1,7 +1,7 @@
 {
   "name": "guardian",
   "productName": "Guardian",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A modern, endless remake of the classic arcade game Defender",
   "main": "main.js",
   "author": "gkorbey",
@@ -21,6 +21,7 @@
     "directories": {
       "output": "release"
     },
+    "icon": "build/icon.png",
     "files": [
       "main.js",
       "preload.js",

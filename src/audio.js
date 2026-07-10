@@ -36,6 +36,7 @@ class AudioEngine {
     this.musicGain.connect(this.master);
 
     this.noiseBuffer = this._buildNoiseBuffer(1.0);
+    this.startMusic();
   }
 
   _buildNoiseBuffer(duration) {
@@ -140,8 +141,50 @@ class AudioEngine {
     this._tone(60, { type: 'sine', duration: 1.0, peak: 0.5, attack: 0.001 });
   }
 
+  dropBomb() {
+    this._tone(200, { type: 'sine', duration: 0.5, peak: 0.2, glideTo: 60 });
+  }
+
   hyperspace() {
     this._tone(1200, { type: 'sine', duration: 0.25, peak: 0.2, glideTo: 80 });
+  }
+
+  // A literal reversed explosion: noise/tone swell upward in pitch and
+  // brightness over the duration, then cut off sharply at the end, instead
+  // of the usual instant-attack-then-decay shape.
+  implode() {
+    if (!this.ctx) return;
+    const t0 = this.ctx.currentTime;
+    const dur = 0.7;
+
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(150, t0);
+    filter.frequency.exponentialRampToValueAtTime(4000, t0 + dur);
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.001, t0);
+    noiseGain.gain.exponentialRampToValueAtTime(0.5, t0 + dur * 0.92);
+    noiseGain.gain.linearRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(this.sfxGain);
+    src.start(t0);
+    src.stop(t0 + dur + 0.05);
+
+    const osc = this.ctx.createOscillator();
+    const oscGain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(50, t0);
+    osc.frequency.exponentialRampToValueAtTime(240, t0 + dur);
+    oscGain.gain.setValueAtTime(0.001, t0);
+    oscGain.gain.exponentialRampToValueAtTime(0.45, t0 + dur * 0.9);
+    oscGain.gain.linearRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(oscGain);
+    oscGain.connect(this.sfxGain);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.05);
   }
 
   extraLife() {

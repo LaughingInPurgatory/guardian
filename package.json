@@ -4,7 +4,7 @@
   "version": "1.0.3",
   "description": "A modern, endless remake of the classic arcade game Defender",
   "main": "main.js",
-  "author": "gkorbey",
+  "author": "LaughingInPurgatory",
   "license": "MIT",
   "scripts": {
     "start": "electron .",

@@ -171,7 +171,8 @@ class Game {
     this.turrets = [];
     for (let i = 0; i < TURRET_COUNT; i++) {
       const x = wrap((i / TURRET_COUNT) * WORLD_W + rand(-60, 60), WORLD_W);
-      this.turrets.push({ type: 'turret', x, y: 0, hp: ENEMY_STATS.turret.hp, fireCooldown: rand(0, 1.5), facing: 1 });
+      const y = this.viewH - GROUND_MARGIN - groundHeightAt(this.elev, x) - 8;
+      this.turrets.push({ type: 'turret', x, y, hp: ENEMY_STATS.turret.hp, fireCooldown: rand(0, 1.5), facing: 1 });
     }
     this.enemies = [];
     this.playerBullets = [];
@@ -633,6 +634,8 @@ class Game {
   _updateTurrets(dt) {
     const diff = computeDifficulty(this.wave);
     for (const t of this.turrets) {
+      // Keep y on the ground so shots and hitboxes aren't stuck at the top of the screen.
+      t.y = this.viewH - GROUND_MARGIN - groundHeightAt(this.elev, t.x) - 8;
       t.fireCooldown -= dt;
       const dx = wrapDelta(this.player.x - t.x, WORLD_W);
       if (Math.abs(dx) < 420 && t.fireCooldown <= 0) {

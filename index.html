@@ -14,11 +14,13 @@
     <div class="scanlines"></div>
     <h1 class="title-logo">GUARDIAN</h1>
     <p class="subtitle">Defend the last humanoids. Survive forever. Fail eventually.</p>
-    <button id="startBtn" class="arcade-btn">START (Enter / Space / Click / Gamepad)</button>
+    <div class="menu-col">
+      <button id="startBtn" class="arcade-btn">START (Enter / Space / Gamepad)</button>
+      <button id="titleQuitBtn" class="arcade-btn danger">Quit to Desktop</button>
+    </div>
     <div class="controls-hint">
-      <span>WASD / Arrows / Gamepad — Move &nbsp; Space / Click / Gamepad — Fire</span>
-      <span>M — Toggle Mouse Steering (off by default)</span>
-      <span>B — Smart Bomb &nbsp; G — Drop Bomb &nbsp; H — Hyperspace &nbsp; Esc — Pause</span>
+      <span>WASD / Arrows / Gamepad — Move &nbsp; Space / Gamepad — Fire</span>
+      <span>B — Smart Bomb &nbsp; G — Drop Bomb &nbsp; H — Hyperspace &nbsp; Esc — Pause / Menu</span>
     </div>
     <div class="scores-panel">
       <h2>High Scores</h2>
@@ -66,6 +68,7 @@
     game._renderHighScoreList('titleScores');
 
     document.getElementById('startBtn').addEventListener('click', () => game.startNewGame());
+    document.getElementById('titleQuitBtn').addEventListener('click', () => game.quitToDesktop());
     document.getElementById('resumeBtn').addEventListener('click', () => game.resume());
     document.getElementById('restartBtn').addEventListener('click', () => game.startNewGame());
     document.getElementById('quitBtn').addEventListener('click', () => game.quitToDesktop());

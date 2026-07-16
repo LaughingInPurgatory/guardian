@@ -21,7 +21,7 @@ const BULLET_SPEED = 1100;
 const BULLET_TTL = 1.1;
 const BEAM_LENGTH = 60;
 const PLAYER_ACCEL = 950;
-const PLAYER_DRAG = 0; // authentic Defender inertia: no passive braking, only active reverse-thrust slows you down
+// Horizontal only carries inertia (authentic Defender coasting). Vertical is direct — release sticks and you stop climbing/diving.
 const PLAYER_MAX_SPEED = 480;
 const PLAYER_RADIUS = 12;
 const DEATH_RESPAWN_DELAY = 1.6;
@@ -83,9 +83,7 @@ class Game {
     this.dpr = Math.min(2, window.devicePixelRatio || 1);
     this.time = 0;
     this.keys = new Set();
-    this.mouse = { x: 0, y: 0, down: false, active: false };
-    this.mouseControlEnabled = false;
-    this.gamepadFireLatch = false;
+    this.stateBeforePause = 'playing';
     this.gamepadBombLatch = false;
     this.gamepadHyperLatch = false;
     this.gamepadPauseLatch = false;
@@ -111,32 +109,14 @@ class Game {
       if (e.target && e.target.tagName === 'INPUT') return;
       this.audio.init();
       if (e.code === 'Escape') {
-        if (this.state === 'playing') this.pause();
+        if (this.state === 'playing' || this.state === 'title') this.pause();
         else if (this.state === 'paused') this.resume();
-        return;
-      }
-      if (e.code === 'KeyM') {
-        this.mouseControlEnabled = !this.mouseControlEnabled;
-        this.mouse.active = false;
-        this.showBanner(`MOUSE CONTROL: ${this.mouseControlEnabled ? 'ON' : 'OFF'}`);
         return;
       }
       this.keys.add(e.code);
       if (this.state === 'title' && (e.code === 'Enter' || e.code === 'Space')) this.startNewGame();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    this.canvas.addEventListener('mousemove', (e) => {
-      const r = this.canvas.getBoundingClientRect();
-      this.mouse.x = e.clientX - r.left;
-      this.mouse.y = e.clientY - r.top;
-      this.mouse.active = true;
-    });
-    this.canvas.addEventListener('mousedown', () => {
-      this.audio.init();
-      this.mouse.down = true;
-      if (this.state === 'title') this.startNewGame();
-    });
-    window.addEventListener('mouseup', () => (this.mouse.down = false));
     window.addEventListener('gamepadconnected', () => this.audio.init());
   }
 
@@ -152,18 +132,6 @@ class Game {
     bombPressed = bombPressed || this.keys.has('KeyB');
     hyperPressed = hyperPressed || this.keys.has('KeyH');
     dropBombPressed = dropBombPressed || this.keys.has('KeyG');
-
-    if (this.mouseControlEnabled && this.mouse.active && this.player) {
-      const dx = this.mouse.x - this.viewW / 2;
-      const dy = this.mouse.y - this.player.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist > 12) {
-        const mag = clamp(dist / 140, 0, 1);
-        ax += (dx / dist) * mag;
-        ay += (dy / dist) * mag;
-      }
-    }
-    fire = fire || this.mouse.down;
 
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     for (const gp of pads) {
@@ -233,17 +201,26 @@ class Game {
   }
 
   pause() {
+    if (this.state !== 'playing' && this.state !== 'title') return;
+    this.stateBeforePause = this.state;
     this.state = 'paused';
     this.audio.ctx && this.audio.ctx.suspend();
     document.getElementById('punLine').textContent = randomPun();
     this._renderHighScoreList('pauseScores');
+    const resumeBtn = document.getElementById('resumeBtn');
+    if (resumeBtn) {
+      resumeBtn.textContent = this.stateBeforePause === 'title' ? 'Back to Title' : 'Return to Game';
+    }
+    this._setScreen('title', false);
     this._setScreen('pause', true);
   }
 
   resume() {
-    this.state = 'playing';
+    const prev = this.stateBeforePause || 'playing';
+    this.state = prev;
     this.audio.ctx && this.audio.ctx.resume();
     this._setScreen('pause', false);
+    if (prev === 'title') this._setScreen('title', true);
   }
 
   quitToDesktop() {
@@ -354,8 +331,16 @@ class Game {
     this.lastFrame = now;
     this.time += dt;
     if (this.state === 'playing') this._update(dt);
+    else if (this.state === 'title' || this.state === 'paused') this._pollMenuInput();
     this._render();
     requestAnimationFrame((t) => this._loop(t));
+  }
+
+  _pollMenuInput() {
+    const input = this._readCombinedInput();
+    if (!input.pausePressed) return;
+    if (this.state === 'title') this.pause();
+    else if (this.state === 'paused') this.resume();
   }
 
   _update(dt) {
@@ -393,13 +378,11 @@ class Game {
       return;
     }
     if (p.invuln > 0) p.invuln -= dt;
+    // Horizontal: coast with inertia; reverse thrust is the only brake.
     p.vx += input.ax * PLAYER_ACCEL * dt;
-    p.vy += input.ay * PLAYER_ACCEL * dt;
-    p.vx -= p.vx * PLAYER_DRAG * dt;
-    p.vy -= p.vy * PLAYER_DRAG * dt;
-    const speed = Math.hypot(p.vx, p.vy);
-    const maxSpeed = PLAYER_MAX_SPEED * (p.effects.rapid ? 1 : 1);
-    if (speed > maxSpeed) { p.vx = (p.vx / speed) * maxSpeed; p.vy = (p.vy / speed) * maxSpeed; }
+    p.vx = clamp(p.vx, -PLAYER_MAX_SPEED, PLAYER_MAX_SPEED);
+    // Vertical: no coast — velocity tracks stick/keys directly.
+    p.vy = input.ay * PLAYER_MAX_SPEED;
     p.x = wrap(p.x + p.vx * dt, WORLD_W);
     p.y = clamp(p.y + p.vy * dt, TOP_MARGIN + PLAYER_RADIUS, this.viewH - 10);
     if (Math.abs(input.ax) > 0.12) p.facing = input.ax > 0 ? 1 : -1;
@@ -1105,10 +1088,6 @@ class Game {
     ctx.fillText(`WAVE ${this.wave}`, 200, this.viewH - 26);
     ctx.fillText(`LIVES ${this.lives}`, 320, this.viewH - 26);
     ctx.fillText(`BOMBS ${this.bombs}`, 460, this.viewH - 26);
-    ctx.fillStyle = this.mouseControlEnabled ? '#4df0ff' : '#5a6a78';
-    ctx.textAlign = 'right';
-    ctx.fillText(`MOUSE (M): ${this.mouseControlEnabled ? 'ON' : 'OFF'}`, this.viewW - 12, this.viewH - 26);
-    ctx.textAlign = 'left';
   }
 
   _drawMinimap() {

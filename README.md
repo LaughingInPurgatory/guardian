@@ -1,4 +1,20 @@
-# Guardian
+<table>
+  <tr>
+    <td>
+      <img src="build/icon.png" width="96" alt="Guardian icon" />
+    </td>
+    <td>
+      <h1>Guardian</h1>
+    </td>
+    <td align="right" valign="middle">
+      <a href="https://ko-fi.com/laughinginpurgatory">
+        <img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support me on Ko-fi" />
+      </a>
+      <br />
+      <em>Please support me on Kofi, every bit helps!</em>
+    </td>
+  </tr>
+</table>
 
 A modern, endless remake of the classic arcade game *Defender*. Rescue humanoids,
 fight off an escalating alien assault, and chase a high score — the game never
